@@ -109,7 +109,13 @@ def setup_parser():
                         help='Activate ssh compression option (-C).')
     parser.add_argument('-S', '--showconfig', action='store_true', default=False,
                         help='Show all available configurations from your default file and exit.')
-
+    parser.add_argument('-T', '--tensorboard', action='store_true', default=False,
+                        help="Lauch an instance of TensorBoard. A Python installation with "
+                        "TensorFlow must be available to make this work.")
+    parser.add_argument('-l', '--logdir', default=None,
+                        help="Absolute path to the TensorBoard log directory. This is only "
+                        "used if the TensorBoard option is selected.")
+                        
     return parser
 
 

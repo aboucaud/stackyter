@@ -115,7 +115,7 @@ def setup_parser():
     parser.add_argument('-l', '--logdir', default=None,
                         help="Absolute path to the TensorBoard log directory. This is only "
                         "used if the TensorBoard option is selected.")
-                        
+
     return parser
 
 
@@ -150,7 +150,12 @@ def main():
         raise ValueError("You must give a valide host name (--host)")
 
     # Do we have a valid username
-    args.username = "" if args.username is None else args.username + "@"
+    if args.username is not None:
+        args.host = "{}@{}".format(args.username, args.host)
+
+    if args.tensorboard:
+        if args.logdir is None:
+            raise ValueError("You must provide a logdir path to TensorBoard (--logdir)")
 
     # Make sure that we have a list (even empty) for extra commands to run
     args.runbefore = string_to_list(args.runbefore)
@@ -158,12 +163,26 @@ def main():
 
     # A random port number is selected between 1025 and 65635 (included) for server side to
     # prevent from conflict between users.
-    port = np.random.randint(1025, high=65635)
+    port = np.random.randint(1025, high=65634)
+    port_tensorboard = port + 1
 
     # Start building the command line that will be launched on the host
     # Open the ssh tunnel to the host
-    cmd = "ssh -X -Y %s -tt -L 20001:localhost:%i %s%s << EOF\n" % \
-          ("-C" if args.compression else "", port, args.username, args.host)
+    ssh_options = "-X -Y -tt"
+    if args.compression:
+        ssh_options += " -C"
+
+    tunnel = "-L 20001:localhost:{}".format(port)
+
+    tunnel2 = ""
+    if args.tensorboard:
+        tunnel2 = "-L 20002:localhost:{}".format(port_tensorboard)
+
+    cmd = ("ssh {options} {tunnel} {tunnel2} {host} << EOF\n"
+           .format(options=ssh_options,
+                   tunnel=tunnel,
+                   tunnel2=tunnel2,
+                   host=args.host))
 
     # Move to the working directory
     if args.workdir is not None:
@@ -184,6 +203,10 @@ def main():
     # Launch jupyter
     cmd += 'jupyter %s --no-browser --port=%i --ip=127.0.0.1 &\n' % (args.jupyter, port)
 
+    if args.tensorboard:
+        cmd += ('tensorboard --logdir={} --port={} &\n'
+                .format(args.logdir, port_tensorboard))
+
     # Get the token number and print out the right web page to open
     cmd += "export servers=\`jupyter notebook list\`\n"
     # If might have to wait a little bit until the server is actually running...
@@ -195,11 +218,17 @@ def main():
     cmd += "printf '\\n    Copy/paste this URL into your browser to run the notebook" + \
            " localy \n\\x1B[01;92m       'http://localhost:20001/\$TOKEN' \\x1B[0m\\n\\n'\n"
 
+    if args.tensorboard:
+        cmd += "printf 'tensorboard \\x1B[01;92m       'http://localhost:20002/' \\x1B[0m\\n\\n'\n"
+
     # Go back to the jupyter server
     cmd += 'fg\n'
 
     # And make sure we can kill it properly
     cmd += "kill -9 `ps | grep jupyter | awk '{print $1}'`\n"
+
+    if args.tensorboard:
+        cmd += "kill -9 `ps | grep tensorboard | awk '{print $1}'`\n"
 
     # Close
     cmd += "EOF"

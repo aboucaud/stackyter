@@ -158,8 +158,10 @@ def main():
             raise ValueError("You must provide a logdir path to TensorBoard (--logdir)")
 
     # Make sure that we have a list (even empty) for extra commands to run
-    args.runbefore = string_to_list(args.runbefore)
-    args.runafter = string_to_list(args.runafter)
+    args.runbefore = [run.replace("$", "\$")
+                      for run in string_to_list(args.runbefore)]
+    args.runafter = [run.replace("$", "\$")
+                     for run in string_to_list(args.runafter)]
 
     # A random port number is selected between 1025 and 65635 (included) for server side to
     # prevent from conflict between users.
@@ -167,6 +169,8 @@ def main():
     port_tensorboard = port + 1
 
     # Start building the command line that will be launched on the host
+    cmd_list = []
+
     # Open the ssh tunnel to the host
     ssh_options = "-X -Y -tt"
     if args.compression:
@@ -178,60 +182,86 @@ def main():
     if args.tensorboard:
         tunnel2 = "-L 20002:localhost:{}".format(port_tensorboard)
 
-    cmd = ("ssh {options} {tunnel} {tunnel2} {host} << EOF\n"
-           .format(options=ssh_options,
-                   tunnel=tunnel,
-                   tunnel2=tunnel2,
-                   host=args.host))
+    ssh_cmd = ("ssh {options} {tunnel} {tunnel2} {host} << EOF\n"
+               .format(options=ssh_options,
+                       tunnel=tunnel,
+                       tunnel2=tunnel2,
+                       host=args.host))
+
+    cmd_list.append(ssh_cmd)
 
     # Move to the working directory
     if args.workdir is not None:
-        cmd += "if [[ ! -d %s ]]; then echo 'Error: directory %s does not exist'; exit 1; fi\n" % \
-               (args.workdir, args.workdir)
-        cmd += "cd %s\n" % args.workdir
+        cmd_list.append("cd {}".format(args.workdir))
 
+    # Do we have to run something before sourcing the setup file
     if args.runbefore:
-        # Do we have to run something before sourcing the setup file
-        cmd += ''.join([run.replace("$", "\$") + "\n" for run in args.runbefore])
+        cmd_list.extend(args.runbefore)
+
+    # Use the setup file given by the user to set up the working environment
     if args.mysetup is not None:
-        # Use the setup file given by the user to set up the working environment
-        cmd += "source %s\n" % args.mysetup
+        cmd_list.append("source {}".format(args.mysetup))
+
+    # Do we have to run something after sourcing the setup file
     if args.runafter:
-        # Do we have to run something after sourcing the setup file
-        cmd += ''.join([run.replace("$", "\$") + "\n" for run in args.runafter])
+        cmd_list.extend(args.runafter)
 
     # Launch jupyter
-    cmd += 'jupyter %s --no-browser --port=%i --ip=127.0.0.1 &\n' % (args.jupyter, port)
+    jupyter_cmd = ('jupyter {} --no-browser --port={} --ip=127.0.0.1 &'
+                   .format(args.jupyter, port))
 
+    cmd_list.append(jupyter_cmd)
+
+    # Leauch tensorboard
     if args.tensorboard:
-        cmd += ('tensorboard --logdir={} --port={} &\n'
-                .format(args.logdir, port_tensorboard))
+        tensorboard_cmd = ('tensorboard --logdir={} --port={} &'
+                           .format(args.logdir, port_tensorboard))
+        cmd_list.append(tensorboard_cmd)
 
     # Get the token number and print out the right web page to open
-    cmd += "export servers=\`jupyter notebook list\`\n"
-    # If might have to wait a little bit until the server is actually running...
-    cmd += "while [[ \$servers != *'127.0.0.1:%i'* ]]; " % port + \
-           "do sleep 1; servers=\`jupyter notebook list\`; echo waiting...; done\n"
-    cmd += "export servers=\`jupyter notebook list | grep '127.0.0.1:%i'\`\n" % port
-    cmd += "export TOKEN=\`echo \$servers | sed 's/\//\\n/g' | " + \
-           "grep token | sed 's/ /\\n/g' | grep token \`\n"
-    cmd += "printf '\\n    Copy/paste this URL into your browser to run the notebook" + \
-           " localy \n\\x1B[01;92m       'http://localhost:20001/\$TOKEN' \\x1B[0m\\n\\n'\n"
+    cmd_list.append("export servers=\`jupyter notebook list\`")
 
+    # If might have to wait a little bit until the server is actually running...
+    wait_cmd = ("while [[ \$servers != *'127.0.0.1:{port}'* ]];"
+                "do sleep 1;"
+                "servers=\`jupyter notebook list\`;"
+                "echo waiting...;"
+                "done").format(port=port)
+    cmd_list.append(wait_cmd)
+    cmd_list.append("export servers=\`jupyter notebook list | "
+                    "grep '127.0.0.1:{port}'\`").format(port=port)
+    token_cmd = ("export TOKEN=\`echo \$servers | "
+                 "sed 's/\//\\n/g' | "
+                 "grep token | "
+                 "sed 's/ /\\n/g' | "
+                 "grep token \`")
+    cmd_list.append(token_cmd)
+
+    shellprint_cmd = ("printf '\\n Copy/paste this URL into your browser "
+                      "to run the notebook localy "
+                      "\n\\x1B[01;92m"
+                      "       'http://localhost:20001/\$TOKEN' "
+                      "\\x1B[0m\\n\\n'")
+    cmd_list.append(shellprint_cmd)
     if args.tensorboard:
-        cmd += "printf 'tensorboard \\x1B[01;92m       'http://localhost:20002/' \\x1B[0m\\n\\n'\n"
+        cmd_list.append("printf 'tensorboard"
+                        "\\x1B[01;92m"
+                        "       'http://localhost:20002/'"
+                        "\\x1B[0m\\n\\n'")
 
     # Go back to the jupyter server
-    cmd += 'fg\n'
+    cmd_list.append('fg')
 
     # And make sure we can kill it properly
-    cmd += "kill -9 `ps | grep jupyter | awk '{print $1}'`\n"
-
+    kill_cmd = "kill -9 `ps | grep {instance} | awk '{print $1}'`"
+    cmd_list.append(kill_cmd.format(instance='jupyter'))
     if args.tensorboard:
-        cmd += "kill -9 `ps | grep tensorboard | awk '{print $1}'`\n"
+        cmd_list.append(kill_cmd.format(instance='tensorboard'))
 
     # Close
-    cmd += "EOF"
+    cmd_list.append("EOF")
+
+    cmd = '\n'.join(cmd_list)
 
     # Run jupyter
     subprocess.call(cmd, stderr=subprocess.STDOUT, shell=True)

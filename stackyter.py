@@ -158,10 +158,13 @@ def main():
             raise ValueError("You must provide a logdir path to TensorBoard (--logdir)")
 
     # Make sure that we have a list (even empty) for extra commands to run
-    args.runbefore = [run.replace("$", "\$")
-                      for run in string_to_list(args.runbefore)]
-    args.runafter = [run.replace("$", "\$")
-                     for run in string_to_list(args.runafter)]
+    if args.runbefore is not None:
+        args.runbefore = [run.replace("$", "\$")
+                          for run in string_to_list(args.runbefore)]
+
+    if args.runafter is not None:
+        args.runafter = [run.replace("$", "\$")
+                         for run in string_to_list(args.runafter)]
 
     # A random port number is selected between 1025 and 65635 (included) for server side to
     # prevent from conflict between users.
@@ -228,8 +231,11 @@ def main():
                 "echo waiting...;"
                 "done").format(port=port)
     cmd_list.append(wait_cmd)
-    cmd_list.append("export servers=\`jupyter notebook list | "
-                    "grep '127.0.0.1:{port}'\`").format(port=port)
+
+    server_cmd = ("export servers=\`jupyter notebook list | "
+                  "grep '127.0.0.1:{port}'\`").format(port=port)
+    cmd_list.append(server_cmd)
+
     token_cmd = ("export TOKEN=\`echo \$servers | "
                  "sed 's/\//\\n/g' | "
                  "grep token | "
@@ -253,10 +259,9 @@ def main():
     cmd_list.append('fg')
 
     # And make sure we can kill it properly
-    kill_cmd = "kill -9 `ps | grep {instance} | awk '{print $1}'`"
-    cmd_list.append(kill_cmd.format(instance='jupyter'))
+    cmd_list.append("kill -9 `ps | grep jupyter | awk '{print $1}'`")
     if args.tensorboard:
-        cmd_list.append(kill_cmd.format(instance='tensorboard'))
+        cmd_list.append("kill -9 `ps | grep tensorboard | awk '{print $1}'`")
 
     # Close
     cmd_list.append("EOF")

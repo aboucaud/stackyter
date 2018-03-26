@@ -223,11 +223,13 @@ def main():
     cmd_list = []
 
     # Open the ssh tunnel to the host
-    ssh_options = "-X -Y -tt"
+    ssh_options = "-"
+    ssh_options += "Y"      # Trusted X11 forwarding
+    ssh_options += "tt"     # Pseudo terminal allocation = local tty
     if args.compression:
-        ssh_options += " -C"
+        ssh_options += "C"  # Add compression of all transmitted data
 
-    tunnel = "-L 20001:localhost:{}".format(port)
+    tunnel = "-L 20001:localhost:{}".format(port)  # Port forwarding
 
     tunnel2 = ""
     if args.tensorboard:

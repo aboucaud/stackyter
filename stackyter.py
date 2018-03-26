@@ -235,7 +235,7 @@ def main():
     if args.tensorboard:
         tunnel2 = "-L 20002:localhost:{}".format(port_tensorboard)
 
-    ssh_cmd = ("ssh {options} {tunnel} {tunnel2} {host} << EOF\n"
+    ssh_cmd = ("ssh {options} {tunnel} {tunnel2} {host} << EOF"
                .format(options=ssh_options,
                        tunnel=tunnel,
                        tunnel2=tunnel2,
